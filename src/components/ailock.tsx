@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -8,6 +9,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent,
   type ReactNode,
+  type Ref,
 } from "react";
 import { BrandMark, DesignIcon, type IconName } from "../design/icons";
 import { apps, permissionRows } from "../design/sampleData";
@@ -843,21 +845,21 @@ export function AppListGroup({
   query?: string;
   onSelectionChange?: (count: number) => void;
 }) {
-  const [selectedNames, setSelectedNames] = useState<Set<string>>(
-    () => new Set(apps.filter((app) => app.selected).map((app) => app.name)),
+  const [selectedIds, setSelectedIds] = useState<Set<AppSample["id"]>>(
+    () => new Set(apps.filter((app) => app.selected).map((app) => app.id)),
   );
   const visibleApps = useMemo(
     () => apps.filter((app) => app.name.toLowerCase().includes(query.trim().toLowerCase())),
     [query],
   );
 
-  const toggle = (name: string) => {
-    setSelectedNames((previous) => {
+  const toggle = (id: AppSample["id"]) => {
+    setSelectedIds((previous) => {
       const next = new Set(previous);
-      if (next.has(name)) {
-        next.delete(name);
+      if (next.has(id)) {
+        next.delete(id);
       } else {
-        next.add(name);
+        next.add(id);
       }
       onSelectionChange?.(next.size);
       return next;
@@ -870,8 +872,8 @@ export function AppListGroup({
         <div className="empty-row">No apps found.</div>
       ) : (
         visibleApps.map((app, index) => (
-          <div key={app.name}>
-            <AppListItem app={app} onClick={() => toggle(app.name)} selected={selectedNames.has(app.name)} />
+          <div key={app.id}>
+            <AppListItem app={app} onClick={() => toggle(app.id)} selected={selectedIds.has(app.id)} />
             {index !== visibleApps.length - 1 ? <RowDivider /> : null}
           </div>
         ))
@@ -1023,7 +1025,7 @@ export function UsageList() {
     <div className="stack">
       <AilockList>
         {apps.map((app, index) => (
-          <div key={app.name}>
+          <div key={app.id}>
             <UsageBar app={app} boost={boost} />
             {index !== apps.length - 1 ? <RowDivider /> : null}
           </div>
@@ -1290,6 +1292,7 @@ export function IconButton({
   variant = "field",
   direction,
   onClick,
+  onPointerDown,
 }: {
   icon: IconName;
   label: string;
@@ -1297,12 +1300,14 @@ export function IconButton({
   variant?: "header" | "field" | "action";
   direction?: "left" | "right";
   onClick?: () => void;
+  onPointerDown?: (event: PointerEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <button
       aria-label={label}
       className={cx("icon-button", variant, direction === "left" && "icon-left", active && "active")}
       onClick={onClick}
+      onPointerDown={onPointerDown}
       type="button"
     >
       <DesignIcon name={icon} size={22} />
@@ -1490,10 +1495,10 @@ function AccordionPlayground() {
                   />
                 }
               >
-                <>
+                <ScreenSection>
                   <ContentSectionLabel title="Lock timer" trailing={<span className="section-meta">{item.duration}</span>} />
                   <TimeWheelPicker value={item.value} />
-                </>
+                </ScreenSection>
               </AilockAccordion>
               {index !== demoItems.length - 1 ? <RowDivider /> : null}
             </div>
@@ -1532,10 +1537,10 @@ export function AccordionStateMatrix() {
               />
             }
           >
-            <>
+            <ScreenSection>
               <ContentSectionLabel title="Lock timer" trailing={<span className="section-meta">45 min</span>} />
               <TimeWheelPicker value={{ hours: 0, minutes: 45 }} />
-            </>
+            </ScreenSection>
           </AilockAccordion>
         </AilockList>
       </StateTile>
@@ -1549,7 +1554,7 @@ function UsagePlayground() {
     <div className="primitive-demo-stack app-demo-stack">
       <AilockList>
         {apps.map((app, index) => (
-          <div key={app.name}>
+          <div key={app.id}>
             <UsageBar app={app} boost={boost} />
             {index !== apps.length - 1 ? <RowDivider /> : null}
           </div>
@@ -2142,16 +2147,31 @@ const deniedDecisionMessage =
   "지금은 안 돼. 이유가 확실하지 않아.\n육하원칙에 따라서 말해줘.";
 const retryDeniedDecisionMessage =
   "그래도 안 돼. 지금 요청은 목적이 충분히 분명하지 않아.\n다른 방법을 선택해.";
-const allowedDecisionMessage = "좋아. 이번에는 10분만 허용할게.";
+const allowedDecisionMessage = "좋아. 5분만 사용할 수 있어.";
+const extendedDecisionMessage = "좋아. 10분으로 늘릴게.";
+const maxedDecisionMessage = "이미 10분까지 허용했어. 지금은 사용해.";
 const defaultChatAppName = "YouTube";
 const thinkingStatusLabel = "AILock이 생각하고 있어요";
 const retryDecisionLabel = "다시 요청하기";
 const confirmDecisionLabel = "확인";
 const reasonInputPlaceholder = "이유를 입력해줘";
-const chatSubmitFadeMs = 260;
-const chatThinkingResolveMs = 1250;
+const reasonDecisionTiming = {
+  resolveMs: 1250,
+  submitFadeMs: 260,
+} as const;
 
 type ChatMessageRole = "assistant" | "user";
+type ChatDecisionMessage = {
+  id: number;
+  role: ChatMessageRole;
+  text: string;
+  mood?: MascotMood;
+};
+type ChatMascotMotionSnapshot = {
+  scale: string;
+  x: string;
+  y: string;
+};
 type ChatDecisionPhase =
   | "asking"
   | "submitting"
@@ -2162,8 +2182,156 @@ type ChatDecisionPhase =
   | "retryThinking"
   | "retryResult";
 
+function isChatSubmittingPhase(phase: ChatDecisionPhase) {
+  return phase === "submitting" || phase === "retrySubmitting";
+}
+
+function isChatThinkingPhase(phase: ChatDecisionPhase) {
+  return phase === "thinking" || phase === "retryThinking";
+}
+
+function isChatResultPhase(phase: ChatDecisionPhase) {
+  return phase === "result" || phase === "retryResult";
+}
+
+function isChatInputPhase(phase: ChatDecisionPhase) {
+  return phase === "asking" || phase === "editing" || isChatResultPhase(phase);
+}
+
+function getThinkingPhaseAfterSubmit(phase: ChatDecisionPhase): ChatDecisionPhase {
+  return phase === "retrySubmitting" ? "retryThinking" : "thinking";
+}
+
+function getResultPhaseAfterThinking(phase: ChatDecisionPhase): ChatDecisionPhase {
+  return phase === "retryThinking" ? "retryResult" : "result";
+}
+
+export type ReasonDecisionScenario = {
+  allowAfterAttempts?: number | null;
+  allowMessage?: string;
+  allowMinutes?: number;
+  denyMessages?: string[];
+  extendMessage?: string;
+  extendMinutes?: number;
+  maxedMessage?: string;
+};
+type ReasonDecisionOutcome = {
+  message: string;
+  minutes?: number;
+  mood?: MascotMood;
+  type: "denied" | "allowed" | "extended" | "maxed";
+};
+
+const defaultReasonDecisionScenario: ReasonDecisionScenario = {
+  allowAfterAttempts: null,
+  allowMessage: allowedDecisionMessage,
+  allowMinutes: 5,
+  denyMessages: [deniedDecisionMessage, retryDeniedDecisionMessage],
+  extendMessage: extendedDecisionMessage,
+  extendMinutes: 10,
+  maxedMessage: maxedDecisionMessage,
+};
+
 function getReasonQuestion(appName: string) {
   return `왜 이 ${appName}을 사용하고자 해?`;
+}
+
+function formatUseMinutes(minutes: number) {
+  return `${minutes}분`;
+}
+
+function getDeniedReasonMessage(scenario: ReasonDecisionScenario, attempt: number) {
+  const denyMessages = scenario.denyMessages?.length ? scenario.denyMessages : defaultReasonDecisionScenario.denyMessages ?? [];
+  return denyMessages[Math.min(Math.max(attempt - 1, 0), denyMessages.length - 1)] ?? deniedDecisionMessage;
+}
+
+function getReasonDecision(scenario: ReasonDecisionScenario, attempt: number, approvedMinutes: number | null): ReasonDecisionOutcome {
+  const allowAfterAttempts = scenario.allowAfterAttempts ?? null;
+  const allowMinutes = scenario.allowMinutes ?? defaultReasonDecisionScenario.allowMinutes ?? 5;
+  const extendMinutes = scenario.extendMinutes ?? defaultReasonDecisionScenario.extendMinutes ?? allowMinutes;
+
+  if (approvedMinutes !== null) {
+    if (extendMinutes > approvedMinutes) {
+      return {
+        message: scenario.extendMessage ?? defaultReasonDecisionScenario.extendMessage ?? extendedDecisionMessage,
+        minutes: extendMinutes,
+        mood: "success",
+        type: "extended",
+      };
+    }
+
+    return {
+      message: scenario.maxedMessage ?? defaultReasonDecisionScenario.maxedMessage ?? maxedDecisionMessage,
+      minutes: approvedMinutes,
+      mood: "success",
+      type: "maxed",
+    };
+  }
+
+  if (allowAfterAttempts !== null && attempt >= allowAfterAttempts) {
+    return {
+      message: scenario.allowMessage ?? defaultReasonDecisionScenario.allowMessage ?? allowedDecisionMessage,
+      minutes: allowMinutes,
+      mood: "success",
+      type: "allowed",
+    };
+  }
+
+  return {
+    message: getDeniedReasonMessage(scenario, attempt),
+    mood: "idle",
+    type: "denied",
+  };
+}
+
+function appendChatDecisionMessage(
+  previous: ChatDecisionMessage[],
+  message: Omit<ChatDecisionMessage, "id">,
+): ChatDecisionMessage[] {
+  return [...previous, { ...message, id: previous.length }];
+}
+
+function blurActiveElement() {
+  if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+}
+
+function readChatMascotMotionSnapshot(flow: HTMLDivElement | null) {
+  if (!flow) return null;
+
+  const chatAnchor = flow.querySelector<HTMLElement>(".chat-message.role-assistant.layout-inline .chat-mascot-anchor");
+  const floatingLayer = flow.querySelector<HTMLElement>(".chat-floating-mascot-layer");
+  const floatingMascot = flow.querySelector<HTMLElement>(".chat-floating-mascot .mascot");
+  const floatingSymbol = flow.querySelector<HTMLElement>(".chat-floating-mascot .brand-symbol");
+  if (!chatAnchor || !floatingLayer || !floatingMascot) return null;
+
+  const anchorRect = chatAnchor.getBoundingClientRect();
+  const layerRect = floatingLayer.getBoundingClientRect();
+  const layerStyle = window.getComputedStyle(floatingLayer);
+  const layerPaddingBottom = Number.parseFloat(layerStyle.paddingBottom) || 0;
+  const mascotWidth = floatingMascot.offsetWidth || floatingMascot.getBoundingClientRect().width || 1;
+  const mascotHeight = floatingMascot.offsetHeight || floatingMascot.getBoundingClientRect().height || 1;
+  const mascotVisualWidth = floatingSymbol ? Number.parseFloat(window.getComputedStyle(floatingSymbol).width) || mascotWidth : mascotWidth;
+  const thinkingCenterX = layerRect.left + layerRect.width / 2;
+  const thinkingCenterY = layerRect.bottom - layerPaddingBottom - mascotHeight / 2;
+  const anchorCenterX = anchorRect.left + anchorRect.width / 2;
+  const anchorCenterY = anchorRect.top + anchorRect.height / 2;
+  const scale = Math.max(0.2, Math.min(1, anchorRect.width / mascotVisualWidth));
+
+  return {
+    scale: `${scale}`,
+    x: `${anchorCenterX - thinkingCenterX}px`,
+    y: `${anchorCenterY - thinkingCenterY}px`,
+  };
+}
+
+function applyChatMascotMotionSnapshot(flow: HTMLDivElement | null, snapshot: ChatMascotMotionSnapshot | null) {
+  const floatingLayer = flow?.querySelector<HTMLElement>(".chat-floating-mascot-layer");
+  if (!floatingLayer || !snapshot) return;
+  floatingLayer.style.setProperty("--chat-floating-mascot-x", snapshot.x);
+  floatingLayer.style.setProperty("--chat-floating-mascot-y", snapshot.y);
+  floatingLayer.style.setProperty("--chat-floating-mascot-scale", snapshot.scale);
 }
 
 export function ChatMessage({
@@ -2171,18 +2339,24 @@ export function ChatMessage({
   children,
   className,
   mood = "idle",
+  reserveMascotSpace = false,
   role = "assistant",
+  showMascot = true,
 }: {
   animated?: boolean;
   children: ReactNode;
   className?: string;
   mood?: MascotMood;
+  reserveMascotSpace?: boolean;
   role?: ChatMessageRole;
+  showMascot?: boolean;
 }) {
   const isAssistant = role === "assistant";
+  const hasMascot = isAssistant && showMascot;
+  const hasMascotSlot = isAssistant && (hasMascot || reserveMascotSpace);
   return (
-    <div className={cx("chat-message", `role-${role}`, isAssistant && "layout-inline", className)}>
-      {isAssistant ? <Mascot mood={mood} size="sm" /> : null}
+    <div className={cx("chat-message", `role-${role}`, hasMascotSlot ? "layout-inline" : isAssistant && "layout-bubble", className)}>
+      {hasMascot ? <Mascot mood={mood} size="sm" /> : hasMascotSlot ? <span aria-hidden className="chat-mascot-anchor" /> : null}
       <SpeechBubble animated={animated} className="chat-message-bubble">
         {children}
       </SpeechBubble>
@@ -2190,28 +2364,54 @@ export function ChatMessage({
   );
 }
 
-export function ChatThread({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cx("chat-thread", className)}>{children}</div>;
+export function ChatThread({
+  children,
+  className,
+  scrollSignal,
+}: {
+  children: ReactNode;
+  className?: string;
+  scrollSignal?: string | number;
+}) {
+  const threadRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    thread.scrollTop = thread.scrollHeight;
+  }, [scrollSignal]);
+
+  return (
+    <div className={cx("chat-thread", className)} ref={threadRef}>
+      <div className="chat-thread-inner">{children}</div>
+    </div>
+  );
 }
 
 export function ChatInputBar({
+  actionMode = "auto",
+  autoFocus = false,
   disabled = false,
   expanded = false,
   loading = false,
   onActivate,
   onChange,
   onClear,
+  onFocus,
   onSubmit,
   placeholder = reasonInputPlaceholder,
   statusText = thinkingStatusLabel,
   value = "",
 }: {
+  actionMode?: "auto" | "none" | "submit";
+  autoFocus?: boolean;
   disabled?: boolean;
   expanded?: boolean;
   loading?: boolean;
   onActivate?: () => void;
   onChange?: (value: string) => void;
   onClear?: () => void;
+  onFocus?: () => void;
   onSubmit?: () => void;
   placeholder?: string;
   statusText?: string;
@@ -2219,7 +2419,8 @@ export function ChatInputBar({
 }) {
   const hasValue = value.trim().length > 0;
   const canSubmit = hasValue && !disabled && !loading;
-  const actionLabel = loading ? "중단" : disabled ? value || placeholder : canSubmit ? "전송" : "지우기";
+  const showAction = actionMode === "auto" || actionMode === "submit";
+  const actionLabel = canSubmit ? "전송" : "지우기";
 
   const handleAction = () => {
     if (canSubmit) {
@@ -2238,7 +2439,7 @@ export function ChatInputBar({
 
   return (
     <div
-      className={cx("chat-input-bar", expanded && "expanded", loading && "loading", disabled && "disabled")}
+      className={cx("chat-input-bar", showAction && "has-action", expanded && "expanded", loading && "loading", disabled && "disabled")}
       onClick={(event) => {
         if (!disabled || !onActivate) return;
         if (event.target instanceof HTMLElement && event.target.closest(".chat-input-action")) return;
@@ -2255,7 +2456,9 @@ export function ChatInputBar({
       ) : (
         <textarea
           aria-label={reasonInputPlaceholder}
+          autoFocus={autoFocus}
           onChange={(event) => onChange?.(event.target.value)}
+          onFocus={onFocus}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           readOnly={!onChange}
@@ -2263,14 +2466,119 @@ export function ChatInputBar({
           value={value}
         />
       )}
-      <button
-        aria-label={actionLabel}
-        className={cx("chat-input-action", canSubmit && "ready")}
-        onClick={handleAction}
-        type="button"
+      {showAction ? (
+        <button
+          aria-label={actionLabel}
+          className={cx("chat-input-action", canSubmit && "ready")}
+          onClick={handleAction}
+          type="button"
+        >
+          <DesignIcon name={canSubmit ? "arrowForward" : "close"} size={20} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function ChatInputDock({
+  autoFocus = false,
+  disabled = false,
+  expanded = false,
+  loading = false,
+  onActivate,
+  onChange,
+  onClear,
+  onDismiss,
+  onFocus,
+  onSubmit,
+  placeholder,
+  statusText,
+  value = "",
+}: {
+  autoFocus?: boolean;
+  disabled?: boolean;
+  expanded?: boolean;
+  loading?: boolean;
+  onActivate?: () => void;
+  onChange?: (value: string) => void;
+  onClear?: () => void;
+  onDismiss?: () => void;
+  onFocus?: () => void;
+  onSubmit?: () => void;
+  placeholder?: string;
+  statusText?: string;
+  value?: string;
+}) {
+  const [focused, setFocused] = useState(false);
+  const dockExpanded = (expanded || focused) && !disabled && !loading;
+  const inputActive = dockExpanded && !disabled && !loading;
+  const handleClear = () => {
+    setFocused(false);
+    onClear?.();
+  };
+  const handleSubmit = () => {
+    setFocused(false);
+    onSubmit?.();
+  };
+  const dismissLabel = onDismiss ? "뒤로가기" : "닫기";
+  const handleDismiss = () => {
+    setFocused(false);
+    onDismiss?.();
+    if (!onDismiss) onClear?.();
+  };
+
+  return (
+    <div
+      className={cx("chat-input-dock", inputActive && "input-active", loading && "loading", disabled && "disabled")}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+      }}
+      onFocusCapture={() => {
+        if (!disabled && !loading) setFocused(true);
+      }}
+      onPointerDown={(event) => {
+        if (disabled || loading) return;
+        if (event.target instanceof HTMLElement && event.target.closest(".chat-input-bar")) setFocused(true);
+      }}
+    >
+      <ChatInputBar
+        actionMode={disabled || loading ? "none" : "submit"}
+        autoFocus={autoFocus}
+        disabled={disabled}
+        expanded={dockExpanded}
+        loading={loading}
+        onActivate={onActivate}
+        onChange={onChange}
+        onClear={handleClear}
+        onFocus={() => {
+          setFocused(true);
+          onFocus?.();
+        }}
+        onSubmit={handleSubmit}
+        placeholder={placeholder}
+        statusText={statusText}
+        value={value}
+      />
+      <div
+        className="chat-input-dock-action"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          handleDismiss();
+        }}
       >
-        <DesignIcon name={canSubmit ? "arrowForward" : "close"} size={20} />
-      </button>
+        <IconButton
+          active
+          icon="close"
+          label={dismissLabel}
+          onClick={handleDismiss}
+          variant="action"
+        />
+      </div>
     </div>
   );
 }
@@ -2278,17 +2586,98 @@ export function ChatInputBar({
 function ChatFlowFrame({
   children,
   className,
+  frameRef,
   onPointerDown,
 }: {
   children: ReactNode;
   className?: string;
+  frameRef?: Ref<HTMLDivElement>;
   onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void;
 }) {
   return (
-    <div className={cx("chat-flow-frame", className)} onPointerDown={onPointerDown}>
+    <div className={cx("chat-flow-frame", className)} onPointerDown={onPointerDown} ref={frameRef}>
       <div className="chat-flow-content">{children}</div>
     </div>
   );
+}
+
+function ChatFloatingMascot({ mood }: { mood: MascotMood }) {
+  return (
+    <div aria-hidden className="chat-floating-mascot-layer">
+      <div className="chat-floating-mascot">
+        <Mascot mood={mood} size="hero" />
+      </div>
+    </div>
+  );
+}
+
+function ChatDecisionActionDock({
+  onReturn,
+  onUse,
+  useLabel,
+}: {
+  onReturn: () => void;
+  onUse: () => void;
+  useLabel: string;
+}) {
+  return (
+    <div className="chat-decision-action-dock">
+      <AilockButton onClick={onUse}>{useLabel}</AilockButton>
+      <AilockButton onClick={onReturn} variant="secondary">
+        {"돌아가기"}
+      </AilockButton>
+    </div>
+  );
+}
+
+function ReasonComposerThread({
+  lastAssistantMessageId,
+  messages,
+  scrollSignal,
+}: {
+  lastAssistantMessageId?: number;
+  messages: ChatDecisionMessage[];
+  scrollSignal: string;
+}) {
+  return (
+    <ChatThread scrollSignal={scrollSignal}>
+      {messages.map((message) => (
+        <ChatMessage
+          key={message.id}
+          mood={message.mood}
+          reserveMascotSpace={message.role === "assistant" && message.id === lastAssistantMessageId}
+          role={message.role}
+          showMascot={false}
+        >
+          {message.text}
+        </ChatMessage>
+      ))}
+    </ChatThread>
+  );
+}
+
+function ReasonComposerDock({
+  approvalActionsVisible,
+  approvedUseLabel,
+  busy,
+  inputDock,
+  onDismiss,
+  onReturn,
+  onUse,
+  onWaitCancel,
+}: {
+  approvalActionsVisible: boolean;
+  approvedUseLabel: string;
+  busy: boolean;
+  inputDock: ReactNode;
+  onDismiss?: () => void;
+  onReturn: () => void;
+  onUse: () => void;
+  onWaitCancel: () => void;
+}) {
+  if (busy) return <ChatInputDock loading onClear={onWaitCancel} onDismiss={onDismiss} />;
+  if (approvalActionsVisible) return <ChatDecisionActionDock onReturn={onReturn} onUse={onUse} useLabel={approvedUseLabel} />;
+  return inputDock;
 }
 
 function ChatThinkingState({ onCancel }: { onCancel?: () => void }) {
@@ -2297,14 +2686,14 @@ function ChatThinkingState({ onCancel }: { onCancel?: () => void }) {
       <div className="chat-thinking-cluster">
         <Mascot mood="thinking" size="hero" />
       </div>
-      <ChatInputBar loading onClear={onCancel} />
+      <ChatInputDock loading onClear={onCancel} />
     </ChatFlowFrame>
   );
 }
 
 function ChatInputDemo() {
   const [value, setValue] = useState(sampleReasonMessage);
-  return <ChatInputBar expanded={value.length > 0} onChange={setValue} onClear={() => setValue("")} value={value} />;
+  return <ChatInputDock expanded={value.length > 0} onChange={setValue} onClear={() => setValue("")} value={value} />;
 }
 
 export function ChatComponentsStateMatrix() {
@@ -2319,9 +2708,9 @@ export function ChatComponentsStateMatrix() {
       </StateTile>
       <StateTile title="Input">
         <div className="primitive-demo-stack chat-component-demo">
-          <ChatInputBar />
+          <ChatInputDock />
           <ChatInputDemo />
-          <ChatInputBar disabled value={retryDecisionLabel} />
+          <ChatInputDock disabled value={retryDecisionLabel} />
         </div>
       </StateTile>
       <StateTile title="Thinking">
@@ -2337,52 +2726,99 @@ export function ReasonComposer({
   appName = defaultChatAppName,
   autoResolve = true,
   initial = "",
+  onDismiss,
+  onUseApp,
+  scenario = defaultReasonDecisionScenario,
   thinking = false,
 }: {
   appName?: string;
   autoResolve?: boolean;
   initial?: string;
+  onDismiss?: () => void;
+  onUseApp?: (minutes: number) => void;
+  scenario?: ReasonDecisionScenario;
   thinking?: boolean;
 }) {
+  const questionMessage = getReasonQuestion(appName);
+  const flowRef = useRef<HTMLDivElement>(null);
+  const pendingMascotMotionRef = useRef<ChatMascotMotionSnapshot | null>(null);
   const [phase, setPhase] = useState<ChatDecisionPhase>(thinking ? "thinking" : "asking");
   const [reason, setReason] = useState(thinking ? "" : initial);
-  const [submittedReason, setSubmittedReason] = useState(initial);
-  const [retryReason, setRetryReason] = useState("");
+  const [messages, setMessages] = useState<ChatDecisionMessage[]>(() =>
+    thinking ? [] : [{ id: 0, role: "assistant", text: questionMessage }],
+  );
   const [focused, setFocused] = useState(false);
+  const [requestCount, setRequestCount] = useState(0);
+  const [approvedMinutes, setApprovedMinutes] = useState<number | null>(null);
+  const [approvalActionsVisible, setApprovalActionsVisible] = useState(false);
+  const [pendingDecision, setPendingDecision] = useState<ReasonDecisionOutcome | null>(null);
   const hasContent = reason.length > 0;
-  const acceptsInput = phase === "asking" || phase === "editing";
-  const isSubmittingPhase = phase === "submitting" || phase === "retrySubmitting";
-  const isThinkingPhase = phase === "thinking" || phase === "retryThinking";
+  const acceptsInput = isChatInputPhase(phase);
+  const isSubmittingPhase = isChatSubmittingPhase(phase);
+  const isThinkingPhase = isChatThinkingPhase(phase);
+  const isResultPhase = isChatResultPhase(phase);
   const expanded = (focused || hasContent) && acceptsInput;
-  const questionMessage = getReasonQuestion(appName);
+  const canUseApprovedApp = approvalActionsVisible && approvedMinutes !== null && !isSubmittingPhase && !isThinkingPhase;
+  const approvedUseLabel = approvedMinutes === null ? "" : `${formatUseMinutes(approvedMinutes)} 사용하기`;
+  const messageScrollSignal = `${messages.length}-${phase}`;
+  const lastAssistantMessageId = [...messages].reverse().find((message) => message.role === "assistant")?.id;
+  const floatingMascotMood: MascotMood = isSubmittingPhase || isThinkingPhase ? "thinking" : "idle";
+
+  useLayoutEffect(() => {
+    const syncMascotMotion = () => {
+      const pendingSnapshot = isChatSubmittingPhase(phase) || isChatThinkingPhase(phase) ? pendingMascotMotionRef.current : null;
+      applyChatMascotMotionSnapshot(flowRef.current, pendingSnapshot ?? readChatMascotMotionSnapshot(flowRef.current));
+      if (isChatResultPhase(phase)) {
+        pendingMascotMotionRef.current = null;
+      }
+    };
+
+    syncMascotMotion();
+    const frame = window.requestAnimationFrame(syncMascotMotion);
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase, lastAssistantMessageId, messages.length]);
 
   useEffect(() => {
-    if (phase === "submitting" || phase === "retrySubmitting") {
-      const nextPhase = phase === "retrySubmitting" ? "retryThinking" : "thinking";
-      const timer = window.setTimeout(() => setPhase(nextPhase), chatSubmitFadeMs);
+    if (isChatSubmittingPhase(phase)) {
+      const timer = window.setTimeout(() => setPhase(getThinkingPhaseAfterSubmit(phase)), reasonDecisionTiming.submitFadeMs);
       return () => window.clearTimeout(timer);
     }
 
-    if ((phase === "thinking" || phase === "retryThinking") && autoResolve) {
-      const nextPhase = phase === "retryThinking" ? "retryResult" : "result";
-      const timer = window.setTimeout(() => setPhase(nextPhase), chatThinkingResolveMs);
+    if (isChatThinkingPhase(phase) && autoResolve && pendingDecision) {
+      const nextPhase = getResultPhaseAfterThinking(phase);
+      const timer = window.setTimeout(() => {
+        setMessages((previous) =>
+          appendChatDecisionMessage(previous, {
+            mood: pendingDecision.mood,
+            role: "assistant",
+            text: pendingDecision.message,
+          }),
+        );
+        if (pendingDecision.minutes !== undefined) {
+          setApprovedMinutes(pendingDecision.minutes);
+          setApprovalActionsVisible(true);
+        } else {
+          setApprovalActionsVisible(false);
+        }
+        setPendingDecision(null);
+        setPhase(nextPhase);
+      }, reasonDecisionTiming.resolveMs);
       return () => window.clearTimeout(timer);
     }
 
     return undefined;
-  }, [autoResolve, phase]);
+  }, [autoResolve, pendingDecision, phase]);
 
   const submitReason = () => {
     const nextReason = reason.trim();
     if (!nextReason || !acceptsInput) return;
-    if (phase === "editing") {
-      setRetryReason(nextReason);
-      setPhase("retrySubmitting");
-    } else {
-      setSubmittedReason(nextReason);
-      setRetryReason("");
-      setPhase("submitting");
-    }
+    const nextAttempt = requestCount + 1;
+    pendingMascotMotionRef.current = readChatMascotMotionSnapshot(flowRef.current);
+    setPendingDecision(getReasonDecision(scenario, nextAttempt, approvedMinutes));
+    setRequestCount(nextAttempt);
+    setApprovalActionsVisible(false);
+    setMessages((previous) => appendChatDecisionMessage(previous, { role: "user", text: nextReason }));
+    setPhase(phase === "asking" ? "submitting" : "retrySubmitting");
     setReason("");
     setFocused(false);
   };
@@ -2390,64 +2826,64 @@ export function ReasonComposer({
   const startEditingAgain = () => {
     setReason("");
     setFocused(true);
+    setApprovalActionsVisible(false);
     setPhase("editing");
   };
-
-  const showInitialPrompt = phase === "asking" || phase === "submitting";
-  const showResultOnly = phase === "result";
-  const showConversation = phase === "editing" || phase === "retrySubmitting" || phase === "retryResult";
-  const showRetryExchange = showConversation && retryReason.length > 0;
+  const collapseInput = () => {
+    setFocused(false);
+    blurActiveElement();
+  };
+  const useApprovedApp = () => {
+    if (approvedMinutes !== null) onUseApp?.(approvedMinutes);
+  };
+  const returnToInput = () => {
+    setReason("");
+    setFocused(false);
+    setApprovalActionsVisible(false);
+    blurActiveElement();
+  };
+  const inputDock = (
+    <ChatInputDock
+      autoFocus={phase === "editing"}
+      expanded={expanded}
+      onChange={(value) => {
+        setReason(value);
+      }}
+      onClear={collapseInput}
+      onDismiss={onDismiss}
+      onFocus={() => setFocused(true)}
+      onSubmit={submitReason}
+      placeholder={reasonInputPlaceholder}
+      value={reason}
+    />
+  );
 
   return (
     <ChatFlowFrame
-      className={cx("chat-decision-flow", `phase-${phase}`, isSubmittingPhase && "is-submitting")}
+      className={cx(
+        "chat-decision-flow",
+        `phase-${phase}`,
+        isSubmittingPhase && "is-submitting",
+        isThinkingPhase && "is-thinking",
+        isResultPhase && "is-result",
+      )}
+      frameRef={flowRef}
       onPointerDown={(event) => {
-        if (event.target instanceof HTMLElement && !event.target.closest(".chat-input-bar")) setFocused(false);
+        if (event.target instanceof HTMLElement && !event.target.closest(".chat-input-dock")) setFocused(false);
       }}
     >
-      {isThinkingPhase ? (
-        <>
-          <div className="chat-thinking-cluster">
-            <Mascot mood="thinking" size="hero" />
-          </div>
-          <ChatInputBar loading onClear={startEditingAgain} />
-        </>
-      ) : (
-        <>
-          <ChatThread>
-            {showInitialPrompt ? <ChatMessage>{questionMessage}</ChatMessage> : null}
-            {showResultOnly ? <ChatMessage>{deniedDecisionMessage}</ChatMessage> : null}
-            {showConversation ? (
-              <>
-                {submittedReason ? <ChatMessage role="user">{submittedReason}</ChatMessage> : null}
-                <ChatMessage>{deniedDecisionMessage}</ChatMessage>
-                {showRetryExchange ? <ChatMessage role="user">{retryReason}</ChatMessage> : null}
-                {phase === "retryResult" ? <ChatMessage>{retryDeniedDecisionMessage}</ChatMessage> : null}
-              </>
-            ) : null}
-          </ChatThread>
-          {showResultOnly || phase === "retryResult" ? (
-            <ChatInputBar
-              disabled
-              onActivate={startEditingAgain}
-              onClear={startEditingAgain}
-              value={retryDecisionLabel}
-            />
-          ) : (
-            <ChatInputBar
-              expanded={expanded}
-              loading={phase === "submitting"}
-              onChange={(value) => {
-                setReason(value);
-              }}
-              onClear={() => setReason("")}
-              onSubmit={submitReason}
-              placeholder={reasonInputPlaceholder}
-              value={reason}
-            />
-          )}
-        </>
-      )}
+      <ReasonComposerThread lastAssistantMessageId={lastAssistantMessageId} messages={messages} scrollSignal={messageScrollSignal} />
+      <ChatFloatingMascot mood={floatingMascotMood} />
+      <ReasonComposerDock
+        approvalActionsVisible={canUseApprovedApp && Boolean(onUseApp)}
+        approvedUseLabel={approvedUseLabel}
+        busy={isThinkingPhase || isSubmittingPhase}
+        inputDock={inputDock}
+        onDismiss={onDismiss}
+        onReturn={returnToInput}
+        onUse={useApprovedApp}
+        onWaitCancel={startEditingAgain}
+      />
     </ChatFlowFrame>
   );
 }
@@ -2469,7 +2905,7 @@ function RetryDeniedScenario() {
         <ChatMessage role="user">{retryReasonMessage}</ChatMessage>
         <ChatMessage>{retryDeniedDecisionMessage}</ChatMessage>
       </ChatThread>
-      <ChatInputBar disabled value={retryDecisionLabel} />
+      <ChatInputDock disabled value={retryDecisionLabel} />
     </ChatFlowFrame>
   );
 }
@@ -2511,7 +2947,7 @@ export function DecisionResponse({ state, withRequest = false }: { state: "allow
           {message}
         </ChatMessage>
       </ChatThread>
-      <ChatInputBar disabled value={state === "denied" ? retryDecisionLabel : confirmDecisionLabel} />
+      <ChatInputDock disabled value={state === "denied" ? retryDecisionLabel : confirmDecisionLabel} />
     </ChatFlowFrame>
   );
 }

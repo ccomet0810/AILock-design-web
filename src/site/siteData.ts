@@ -1,3 +1,5 @@
+import type { ReasonDecisionScenario } from "../components/ailock";
+
 export type SitePhoneAppId = "ailock" | "youtube" | "instagram" | "minecraft";
 
 export type SitePhoneApp = {
@@ -43,7 +45,41 @@ export const sitePhoneApps: SitePhoneApp[] = [
     color: "#3C8527",
     id: "minecraft",
     letter: "M",
+    limitSeconds: 30 * 60,
+    locked: true,
     name: "Minecraft",
+    remainingSeconds: 0,
     usageLabel: "오늘 16분 사용",
   },
 ];
+
+export const sitePhoneReasonScenarios: Partial<Record<SitePhoneAppId, ReasonDecisionScenario>> = {
+  youtube: {
+    allowAfterAttempts: 1,
+    allowMessage: "좋아. 5분만 사용할 수 있어.",
+    allowMinutes: 5,
+    extendMessage: "좋아. 10분으로 늘릴게.",
+    extendMinutes: 10,
+    maxedMessage: "이미 10분까지 허용했어. 지금은 사용해.",
+  },
+  instagram: {
+    allowAfterAttempts: 3,
+    allowMessage: "좋아. 5분만 사용할 수 있어.",
+    allowMinutes: 5,
+    denyMessages: [
+      "지금은 안 돼. 이유가 확실하지 않아.\n육하원칙에 따라서 말해줘.",
+      "아직 부족해. 목적과 시간을 더 분명하게 말해.",
+    ],
+    extendMessage: "좋아. 10분으로 늘릴게.",
+    extendMinutes: 10,
+    maxedMessage: "이미 10분까지 허용했어. 지금은 사용해.",
+  },
+  minecraft: {
+    allowAfterAttempts: null,
+    denyMessages: [
+      "지금은 안 돼. Minecraft는 잠금 상태야.",
+      "계속 요청해도 지금은 안 돼.\n다른 일을 먼저 끝내.",
+      "허용하지 않아. 지금은 Minecraft를 열 수 없어.",
+    ],
+  },
+};

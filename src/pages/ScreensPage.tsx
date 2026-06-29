@@ -26,6 +26,7 @@ import {
 } from "../components/ailock";
 import {
   defaultLockTimer,
+  getWeeklyUsageDataForApp,
   initialLockedAppTimers,
   recordUsageApps,
   type DemoUsageApp,
@@ -36,6 +37,7 @@ import { SitePhoneFlow, type SiteAilockRenderProps, type SiteAilockRoute } from 
 
 type AppRoute = SiteAilockRoute;
 type LockableApp = DemoUsageApp;
+type LockableAppId = LockableApp["id"];
 type LockedApp = {
   app: LockableApp;
   durationSeconds: number;
@@ -352,7 +354,7 @@ function RecordsScreen() {
         <ContentSectionLabel title={"앱 사용 기록"} trailing={<span className="section-meta">{`${recordUsageApps.length}개`}</span>} />
         <AilockList>
           {recordUsageApps.map((app, index) => (
-            <div key={app.name}>
+            <div key={app.id}>
               <UsageBar app={app} boost={!isDaily ? 0.08 : 0} />
               {index !== recordUsageApps.length - 1 ? <RowDivider /> : null}
             </div>
@@ -409,13 +411,13 @@ function LockPickerAppRow({
 function LimitsScreen({ onOverlayChange }: { onOverlayChange?: (open: boolean) => void }) {
   const [overlay, setOverlay] = useState<LimitOverlay>(null);
   const [lockedApps, setLockedApps] = useState<LockedApp[]>(() => createInitialLockedApps());
-  const [selectedPickerAppName, setSelectedPickerAppName] = useState<string | null>(null);
+  const [selectedPickerAppId, setSelectedPickerAppId] = useState<LockableAppId | null>(null);
   const [lockTimerTime, setLockTimerTime] = useState<TimeWheelValue>(() => getDefaultLockTimer());
   const [now, setNow] = useState(() => Date.now());
-  const lockedNames = useMemo(() => new Set(lockedApps.map((item) => item.app.name)), [lockedApps]);
+  const lockedAppIds = useMemo(() => new Set(lockedApps.map((item) => item.app.id)), [lockedApps]);
   const selectedPickerApp = useMemo(
-    () => recordUsageApps.find((app) => app.name === selectedPickerAppName) ?? null,
-    [selectedPickerAppName],
+    () => recordUsageApps.find((app) => app.id === selectedPickerAppId) ?? null,
+    [selectedPickerAppId],
   );
   const selectedLockDuration = formatLockDuration(lockTimerTime);
   const canStartLock = selectedPickerApp !== null && getLockDurationSeconds(lockTimerTime) > 0;
@@ -429,27 +431,27 @@ function LimitsScreen({ onOverlayChange }: { onOverlayChange?: (open: boolean) =
 
   const closeOverlay = () => {
     setOverlay(null);
-    setSelectedPickerAppName(null);
+    setSelectedPickerAppId(null);
     onOverlayChange?.(false);
   };
 
   const openPicker = () => {
-    setSelectedPickerAppName(null);
+    setSelectedPickerAppId(null);
     setLockTimerTime(getDefaultLockTimer());
     setOverlay("picker");
     onOverlayChange?.(true);
   };
 
   const selectPickerApp = (app: LockableApp) => {
-    if (lockedNames.has(app.name)) return;
-    setSelectedPickerAppName((current) => (current === app.name ? null : app.name));
+    if (lockedAppIds.has(app.id)) return;
+    setSelectedPickerAppId((current) => (current === app.id ? null : app.id));
     setLockTimerTime(getDefaultLockTimer());
   };
 
   const startLock = () => {
     if (!selectedPickerApp || !canStartLock) return;
     setLockedApps((current) =>
-      current.some((item) => item.app.name === selectedPickerApp.name)
+      current.some((item) => item.app.id === selectedPickerApp.id)
         ? current
         : [...current, createLockedApp(selectedPickerApp, lockTimerTime)],
     );
@@ -471,7 +473,7 @@ function LimitsScreen({ onOverlayChange }: { onOverlayChange?: (open: boolean) =
             <ContentSectionLabel title={"잠금 앱"} trailing={<span className="section-meta">{`${lockedApps.length}개`}</span>} />
             <AilockList>
               {lockedApps.map((lockedApp, index) => (
-                <div key={lockedApp.app.name}>
+                <div key={lockedApp.app.id}>
                   <LockedAppRow lockedApp={lockedApp} now={now} />
                   {index !== lockedApps.length - 1 ? <RowDivider /> : null}
                 </div>
@@ -507,10 +509,11 @@ function LimitsScreen({ onOverlayChange }: { onOverlayChange?: (open: boolean) =
               <ContentSectionLabel title={"모든 앱"} trailing={<span className="section-meta">{`${recordUsageApps.length}개`}</span>} />
               <AilockList>
                 {recordUsageApps.map((app, index) => {
-                  const alreadyLocked = lockedNames.has(app.name);
-                  const expanded = selectedPickerAppName === app.name;
+                  const alreadyLocked = lockedAppIds.has(app.id);
+                  const expanded = selectedPickerAppId === app.id;
+                  const weeklyUsageData = getWeeklyUsageDataForApp(app.id);
                   return (
-                    <div className="lock-picker-item" key={app.name}>
+                    <div className="lock-picker-item" key={app.id}>
                       <AilockAccordion
                         className="lock-picker-accordion"
                         expanded={expanded}
@@ -524,11 +527,20 @@ function LimitsScreen({ onOverlayChange }: { onOverlayChange?: (open: boolean) =
                         }
                       >
                         <>
-                          <ContentSectionLabel
-                            title={"잠금 타이머"}
-                            trailing={<span className="section-meta">{selectedLockDuration}</span>}
-                          />
-                          <TimeWheelPicker onChange={setLockTimerTime} value={lockTimerTime} />
+                          <ScreenSection>
+                            <ContentSectionLabel
+                              title={"최근 7일 사용 시간"}
+                              trailing={<span className="section-meta">{getUsageGraphTotalLabel(weeklyUsageData)}</span>}
+                            />
+                            <WeeklyUsageGraph compact data={weeklyUsageData} label={`${app.name} 최근 7일 사용 그래프`} />
+                          </ScreenSection>
+                          <ScreenSection>
+                            <ContentSectionLabel
+                              title={"잠금 타이머"}
+                              trailing={<span className="section-meta">{selectedLockDuration}</span>}
+                            />
+                            <TimeWheelPicker onChange={setLockTimerTime} value={lockTimerTime} />
+                          </ScreenSection>
                         </>
                       </AilockAccordion>
                       {index !== recordUsageApps.length - 1 ? <RowDivider /> : null}

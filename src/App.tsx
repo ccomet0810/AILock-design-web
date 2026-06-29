@@ -2,13 +2,6 @@ import { useEffect, useState } from "react";
 import { FoundationsPage } from "./pages/FoundationsPage";
 import { ComponentsPage } from "./pages/ComponentsPage";
 import { ScreensPage } from "./pages/ScreensPage";
-import { ColorLabPanel } from "./site/ColorLabPanel";
-import {
-  applyColorLabOverrides,
-  createColorLabValues,
-  type ColorLabTargetName,
-  type ColorLabValues,
-} from "./design/colorLab";
 
 type PageKey = "foundations" | "components" | "screens";
 type FontPlatform = "ios" | "android";
@@ -35,12 +28,6 @@ function fontPlatformFromStorage(): FontPlatform {
 export default function App() {
   const [page, setPage] = useState<PageKey>(pageFromHash);
   const [fontPlatform, setFontPlatform] = useState<FontPlatform>(fontPlatformFromStorage);
-  const [colorValues, setColorValues] = useState<ColorLabValues>(createColorLabValues);
-  const [activeColorTargetName, setActiveColorTargetName] = useState<ColorLabTargetName>("BrandOrange");
-
-  useEffect(() => {
-    applyColorLabOverrides(colorValues);
-  }, [colorValues]);
 
   useEffect(() => {
     const onHashChange = () => setPage(pageFromHash());
@@ -116,23 +103,10 @@ export default function App() {
           ))}
         </div>
 
-        {page === "foundations" && (
-          <FoundationsPage
-            activeColorTargetName={activeColorTargetName}
-            colorValues={colorValues}
-            onSelectColorTarget={setActiveColorTargetName}
-          />
-        )}
+        {page === "foundations" && <FoundationsPage />}
         {page === "components" && <ComponentsPage />}
         {page === "screens" && <ScreensPage />}
       </main>
-
-      <ColorLabPanel
-        activeTargetName={activeColorTargetName}
-        colorValues={colorValues}
-        setActiveTargetName={setActiveColorTargetName}
-        setColorValues={setColorValues}
-      />
     </div>
   );
 }

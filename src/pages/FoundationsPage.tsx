@@ -1,11 +1,6 @@
-import { colors, layout, radii, spacing, typography } from "../design/tokens";
+import { colors, layout, mascot, motion, radii, spacing, typography } from "../design/tokens";
 import { BrandMark, DesignIcon, iconNames } from "../design/icons";
 import { Section, SpecTable } from "../components/ailock";
-import {
-  getColorLabTarget,
-  type ColorLabTargetName,
-  type ColorLabValues,
-} from "../design/colorLab";
 
 const colorGroups = [
   {
@@ -52,55 +47,21 @@ const colorGroups = [
   },
 ] as const;
 
-export function FoundationsPage({
-  activeColorTargetName,
-  colorValues,
-  onSelectColorTarget,
-}: {
-  activeColorTargetName: ColorLabTargetName;
-  colorValues: ColorLabValues;
-  onSelectColorTarget: (targetName: ColorLabTargetName) => void;
-}) {
+export function FoundationsPage() {
   return (
     <div className="page-grid">
       <Section title="Color Tokens" note="당근 오렌지와 잎 그린을 중심으로 보호/제지 느낌을 재정의">
-        <div className="color-lab-toolbar">
-          <span className="color-lab-live-pill">
-            <span className="color-lab-live-dot" style={{ backgroundColor: "var(--brand-orange)" }} />
-            Main button {colorValues.BrandOrange}
-          </span>
-        </div>
-
         <div className="color-grid">
           {colorGroups.map((group) => (
             <div className="token-panel" key={group.title}>
               <h3>{group.title}</h3>
               <div className="swatch-list">
                 {group.items.map(([name, value]) => {
-                  const target = getColorLabTarget(name);
-                  const displayValue = target ? colorValues[target.name] : value;
-                  const swatchValue = target ? `var(${target.cssVar})` : value;
-                  const rowContent = (
-                    <>
-                      <span className="swatch" style={{ backgroundColor: swatchValue }} />
-                      <span>{name}</span>
-                      <code>{displayValue}</code>
-                    </>
-                  );
-
-                  return target ? (
-                    <button
-                      aria-pressed={activeColorTargetName === target.name}
-                      className={activeColorTargetName === target.name ? "swatch-row editable active" : "swatch-row editable"}
-                      key={name}
-                      onClick={() => onSelectColorTarget(target.name)}
-                      type="button"
-                    >
-                      {rowContent}
-                    </button>
-                  ) : (
+                  return (
                     <div className="swatch-row" key={name}>
-                      {rowContent}
+                      <span className="swatch" style={{ backgroundColor: value }} />
+                      <span>{name}</span>
+                      <code>{value}</code>
                     </div>
                   );
                 })}
@@ -159,8 +120,11 @@ export function FoundationsPage({
           <SpecTable
             rows={[
               { label: "Card radius", value: `${radii.card}px` },
-              { label: "Control radius", value: `${radii.control}px` },
-              { label: "Graph radius", value: `${radii.graphBar}px` },
+              { label: "List radius", value: `${radii.list}px` },
+              { label: "Graph card radius", value: `${radii.graphCard}px` },
+              { label: "Control radius", value: "pill" },
+              { label: "Time wheel radius", value: `${radii.wheel}px` },
+              { label: "Graph bar radius", value: "pill" },
               { label: "Chat anchor corner", value: `${radii.chatBubbleAnchor}px`, detail: "말하는 방향의 아래 모서리" },
               { label: "Default border", value: "1px" },
             ]}
@@ -171,6 +135,11 @@ export function FoundationsPage({
               { label: "Nav icon", value: `${layout.navIconSize}px` },
               { label: "Chat avatar", value: `${layout.chatAvatarSize}px` },
               { label: "Chat bubble one-line", value: `${layout.chatBubbleSingleLineHeight}px` },
+              { label: "Chat message max", value: `${layout.chatMessageMaxWidth}px` },
+              { label: "Mascot lg visual", value: `${mascot.visualLg}px` },
+              { label: "Mascot hero visual", value: `${mascot.visualHero}px` },
+              { label: "Fast motion", value: `${motion.fastMs}ms` },
+              { label: "Chat motion", value: `${motion.chatMs}ms` },
               { label: "Permission icon", value: "38px" },
               { label: "Segment", value: "48 x 32px" },
             ]}

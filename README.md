@@ -25,7 +25,7 @@ npm run build
 
 ## Structure
 
-- `src/design/`: Android implementation can mirror these tokens and demo data first.
+- `src/design/`: design tokens and demo data.
 - `src/components/`: reusable AILock primitives, rows, graphs, navigation, chat, and composed patterns.
 - `src/pages/`: design lab pages that document foundations, components, and screen flows.
 - `src/site/`: web-only controls for this review site, such as the color panel and phone-flow prototype shell.

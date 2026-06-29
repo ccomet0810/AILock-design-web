@@ -1,4 +1,5 @@
 import { apps } from "./sampleData";
+import type { AppCatalogId, AppCategoryId } from "./appCatalog";
 
 export type DemoTimeValue = {
   hours: number;
@@ -6,8 +7,10 @@ export type DemoTimeValue = {
 };
 
 export type DemoUsageApp = {
+  categoryId: AppCategoryId;
   color: string;
   helper: string;
+  id: AppCatalogId;
   letter: string;
   name: string;
   progress: number;
@@ -15,76 +18,50 @@ export type DemoUsageApp = {
   time: string;
 };
 
-export const recordUsageApps: DemoUsageApp[] = [
-  ...apps,
-  {
-    name: "TikTok",
-    helper: "오늘 최대 1시간 30분",
-    color: "#111111",
-    letter: "T",
-    selected: false,
-    progress: 0.58,
-    time: "1시간 07분",
-  },
-  {
-    name: "KakaoTalk",
-    helper: "오늘 최대 1시간",
-    color: "#FEE500",
-    letter: "K",
-    selected: false,
-    progress: 0.4,
-    time: "48분",
-  },
-  {
-    name: "Naver",
-    helper: "오늘 최대 45분",
-    color: "#03C75A",
-    letter: "N",
-    selected: false,
-    progress: 0.34,
-    time: "41분",
-  },
-  {
-    name: "Netflix",
-    helper: "오늘 최대 1시간",
-    color: "#E50914",
-    letter: "N",
-    selected: false,
-    progress: 0.29,
-    time: "35분",
-  },
-  {
-    name: "Discord",
-    helper: "오늘 최대 40분",
-    color: "#5865F2",
-    letter: "D",
-    selected: false,
-    progress: 0.22,
-    time: "27분",
-  },
-  {
-    name: "X",
-    helper: "오늘 최대 30분",
-    color: "#1D1D1F",
-    letter: "X",
-    selected: false,
-    progress: 0.18,
-    time: "21분",
-  },
-  {
-    name: "Threads",
-    helper: "오늘 최대 30분",
-    color: "#5E5CE6",
-    letter: "T",
-    selected: false,
-    progress: 0.12,
-    time: "14분",
-  },
-];
+export type DemoUsageGraphDatum = {
+  label: string;
+  minutes: number;
+  shortLabel?: string;
+};
+
+export const recordUsageApps: DemoUsageApp[] = [...apps];
+
+const recordUsageAppById = Object.fromEntries(recordUsageApps.map((app) => [app.id, app])) as Record<
+  AppCatalogId,
+  DemoUsageApp
+>;
 
 export const defaultLockTimer: DemoTimeValue = { hours: 0, minutes: 25 };
 
 export const initialLockedAppTimers: Array<{ app: DemoUsageApp; timer: DemoTimeValue }> = [
-  { app: recordUsageApps[0], timer: { hours: 0, minutes: 30 } },
-  { app: recordUsageApps[2], timer: { hours: 0, minutes: 45 } },
+  { app: recordUsageAppById.youtube, timer: { hours: 0, minutes: 30 } },
+  { app: recordUsageAppById.chrome, timer: { hours: 0, minutes: 45 } },
 ];
+
+const weeklyUsageLabels = [
+  { label: "월요일", shortLabel: "월" },
+  { label: "화요일", shortLabel: "화" },
+  { label: "수요일", shortLabel: "수" },
+  { label: "목요일", shortLabel: "목" },
+  { label: "금요일", shortLabel: "금" },
+  { label: "토요일", shortLabel: "토" },
+  { label: "일요일", shortLabel: "일" },
+] as const;
+
+const weeklyUsageMinutesByAppId: Record<AppCatalogId, number[]> = {
+  youtube: [58, 74, 42, 96, 83, 121, 68],
+  netflix: [22, 0, 36, 18, 44, 76, 51],
+  instagram: [48, 56, 63, 39, 71, 92, 54],
+  kakaoTalk: [31, 44, 52, 47, 38, 42, 29],
+  chrome: [27, 35, 49, 32, 41, 58, 25],
+  naver: [34, 28, 43, 36, 52, 47, 31],
+  coupang: [18, 21, 15, 29, 36, 44, 24],
+  baemin: [12, 17, 9, 22, 31, 28, 16],
+};
+
+export function getWeeklyUsageDataForApp(appId: AppCatalogId): DemoUsageGraphDatum[] {
+  return weeklyUsageLabels.map((day, index) => ({
+    ...day,
+    minutes: weeklyUsageMinutesByAppId[appId][index] ?? 0,
+  }));
+}

@@ -12,8 +12,7 @@ import {
   PhoneFrame,
   ReasonComposer,
 } from "../components/ailock";
-import { DesignIcon } from "../design/icons";
-import { sitePhoneApps, type SitePhoneApp, type SitePhoneAppId } from "./siteData";
+import { sitePhoneApps, sitePhoneReasonScenarios, type SitePhoneApp, type SitePhoneAppId } from "./siteData";
 
 export type SiteAilockRoute = "home" | "records" | "restrictions" | "settings";
 
@@ -28,31 +27,6 @@ export type SiteAilockRenderProps = {
   setRoute: Dispatch<SetStateAction<SiteAilockRoute>>;
   setRouteOverlayOpen: Dispatch<SetStateAction<boolean>>;
 };
-
-const surfaceLabels: Record<SitePhoneSurface, string> = {
-  phoneHome: "휴대폰 홈",
-  ailock: "AILock",
-  externalApp: "외부 앱",
-  lockPrompt: "차단 팝업",
-};
-
-const routeLabels: Record<SiteAilockRoute, string> = {
-  home: "홈",
-  records: "기록",
-  restrictions: "제한",
-  settings: "설정",
-};
-
-function formatRemainingTime(seconds = 0) {
-  const safeSeconds = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(safeSeconds / 3600);
-  const minutes = Math.floor((safeSeconds % 3600) / 60);
-  const remainingSeconds = safeSeconds % 60;
-
-  if (hours > 0) return `${hours}시간 ${minutes}분 ${remainingSeconds}초 남음`;
-  if (minutes > 0) return `${minutes}분 ${remainingSeconds}초 남음`;
-  return `${remainingSeconds}초 남음`;
-}
 
 function SiteAppIcon({ app }: { app: Pick<SitePhoneApp, "color" | "letter"> }) {
   return (
@@ -90,9 +64,11 @@ function SitePhoneHomeMock({
 }
 
 function SiteExternalAppMock({
+  accessMinutes,
   app,
   onReturnHome,
 }: {
+  accessMinutes?: number | null;
   app: SitePhoneApp;
   onReturnHome: () => void;
 }) {
@@ -102,7 +78,7 @@ function SiteExternalAppMock({
         <SiteAppIcon app={app} />
         <span>
           <strong>{app.name}</strong>
-          <small>{"제한 없음"}</small>
+          <small>{accessMinutes ? `${accessMinutes}분 사용 가능` : "제한 없음"}</small>
         </span>
       </div>
       <div className="site-external-app-body" />
@@ -112,126 +88,6 @@ function SiteExternalAppMock({
         </AilockButton>
       </div>
     </div>
-  );
-}
-
-function SiteFlowPanel({
-  activeApp,
-  onboarded,
-  onOpenApp,
-  onReset,
-  onReturnHome,
-  route,
-  surface,
-}: {
-  activeApp: SitePhoneApp | null;
-  onboarded: boolean;
-  onOpenApp: (app: SitePhoneApp) => void;
-  onReset: () => void;
-  onReturnHome: () => void;
-  route: SiteAilockRoute;
-  surface: SitePhoneSurface;
-}) {
-  const lockedApps = sitePhoneApps.filter((app) => app.locked);
-  const screenLabel =
-    activeApp && surface !== "phoneHome" ? `${surfaceLabels[surface]} · ${activeApp.name}` : surfaceLabels[surface];
-  const routeLabel = surface === "ailock" && onboarded ? routeLabels[route] : "없음";
-  const onboardingLabel = onboarded ? "완료" : "미완료";
-
-  return (
-    <aside className="site-flow-panel" aria-label="Phone flow controls">
-      <div className="site-flow-panel-header">
-        <span className="site-panel-icon">
-          <DesignIcon name="layers" size={18} />
-        </span>
-        <div>
-          <span>{"흐름 상태"}</span>
-          <strong>{screenLabel}</strong>
-        </div>
-        <span className={`site-flow-state-pill ${onboarded ? "complete" : ""}`}>{onboardingLabel}</span>
-      </div>
-
-      <div className="site-flow-status-strip" aria-label={"현재 흐름"}>
-        <SiteFlowMetric label={"현재 화면"} value={screenLabel} />
-        <SiteFlowMetric label={"온보딩"} value={onboardingLabel} />
-        <SiteFlowMetric label={"앱 라우트"} value={routeLabel} />
-      </div>
-
-      <div className="site-flow-lock-strip" aria-label={"제한 앱"}>
-        <span className="site-flow-strip-label">{`제한 앱 ${lockedApps.length}개`}</span>
-        {lockedApps.map((app) => (
-          <SiteFlowLockPill app={app} key={app.id} />
-        ))}
-      </div>
-
-      <div className="site-flow-app-strip" aria-label={"앱 실행"}>
-        <span className="site-flow-strip-label">{"앱 실행"}</span>
-        {sitePhoneApps.map((app) => (
-          <SiteFlowAppChip active={activeApp?.id === app.id} app={app} key={app.id} onOpenApp={onOpenApp} />
-        ))}
-      </div>
-
-      <div className="site-flow-panel-actions">
-        <AilockButton full={false} onClick={onReturnHome} size="small" variant="secondary">
-          {"홈으로"}
-        </AilockButton>
-        <AilockButton
-          full={false}
-          icon={<DesignIcon name="history" size={18} />}
-          onClick={onReset}
-          size="small"
-          variant="secondary"
-        >
-          {"설정 리셋"}
-        </AilockButton>
-      </div>
-    </aside>
-  );
-}
-
-function SiteFlowMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <span className="site-flow-metric">
-      <small>{label}</small>
-      <strong>{value}</strong>
-    </span>
-  );
-}
-
-function SiteFlowLockPill({ app }: { app: SitePhoneApp }) {
-  const remainingSeconds = app.remainingSeconds ?? 0;
-  const limitSeconds = app.limitSeconds ?? remainingSeconds;
-  const progress = limitSeconds > 0 ? Math.max(0, Math.min(1, remainingSeconds / limitSeconds)) : 0;
-
-  return (
-    <span className="site-flow-lock-pill" style={{ "--lock-progress": `${Math.round(progress * 100)}%` } as CSSProperties}>
-      <SiteAppIcon app={app} />
-      <span>
-        <strong>{app.name}</strong>
-        <small>{formatRemainingTime(remainingSeconds)}</small>
-      </span>
-    </span>
-  );
-}
-
-function SiteFlowAppChip({
-  active,
-  app,
-  onOpenApp,
-}: {
-  active: boolean;
-  app: SitePhoneApp;
-  onOpenApp: (app: SitePhoneApp) => void;
-}) {
-  return (
-    <button
-      className={`site-flow-app-chip ${active ? "active" : ""} ${app.locked ? "locked" : ""}`}
-      onClick={() => onOpenApp(app)}
-      type="button"
-    >
-      <SiteAppIcon app={app} />
-      <span>{app.name}</span>
-    </button>
   );
 }
 
@@ -314,10 +170,12 @@ export function SitePhoneFlow({
   const [route, setRoute] = useState<SiteAilockRoute>("home");
   const [routeOverlayOpen, setRouteOverlayOpen] = useState(false);
   const [reasonSession, setReasonSession] = useState(0);
+  const [approvedUseMinutes, setApprovedUseMinutes] = useState<number | null>(null);
   const activeApp = activeAppId ? sitePhoneApps.find((app) => app.id === activeAppId) ?? null : null;
 
   const openApp = (app: SitePhoneApp) => {
     setActiveAppId(app.id);
+    setApprovedUseMinutes(null);
     setRouteOverlayOpen(false);
 
     if (app.id === "ailock") {
@@ -336,16 +194,8 @@ export function SitePhoneFlow({
 
   const returnHome = () => {
     setActiveAppId(null);
+    setApprovedUseMinutes(null);
     setRouteOverlayOpen(false);
-    setSurface("phoneHome");
-  };
-
-  const resetFlow = () => {
-    setActiveAppId(null);
-    setOnboarded(false);
-    setRoute("home");
-    setRouteOverlayOpen(false);
-    setReasonSession((value) => value + 1);
     setSurface("phoneHome");
   };
 
@@ -385,13 +235,22 @@ export function SitePhoneFlow({
       setRouteOverlayOpen,
     });
   } else if (surface === "externalApp" && activeApp) {
-    phoneContent = <SiteExternalAppMock app={activeApp} onReturnHome={returnHome} />;
+    phoneContent = <SiteExternalAppMock accessMinutes={approvedUseMinutes} app={activeApp} onReturnHome={returnHome} />;
   } else if (surface === "lockPrompt" && activeApp) {
     phoneContent = (
       <div className="site-phone-lock">
         <SitePhoneHomeMock activeAppId={activeAppId} onOpenApp={openApp} />
         <div className="site-phone-lock-overlay">
-          <ReasonComposer appName={activeApp.name} key={`${activeApp.id}-${reasonSession}`} />
+          <ReasonComposer
+            appName={activeApp.name}
+            key={`${activeApp.id}-${reasonSession}`}
+            onDismiss={returnHome}
+            onUseApp={(minutes) => {
+              setApprovedUseMinutes(minutes);
+              setSurface("externalApp");
+            }}
+            scenario={sitePhoneReasonScenarios[activeApp.id]}
+          />
         </div>
       </div>
     );
@@ -404,15 +263,6 @@ export function SitePhoneFlow({
           {phoneContent}
         </SitePhoneGestureLayer>
       </PhoneFrame>
-      <SiteFlowPanel
-        activeApp={activeApp}
-        onboarded={onboarded}
-        onOpenApp={openApp}
-        onReset={resetFlow}
-        onReturnHome={returnHome}
-        route={route}
-        surface={surface}
-      />
     </div>
   );
 }
